@@ -235,6 +235,9 @@ CURRICULUM = [
         ),
     },
     # ── Phase 2: Data & Analytics ──────────────────────────────────────────
+    # All Phase 2 challenges use real baseball pitching data from the Pitch Profiler API.
+    # Import helpers: from baseball_data import career_pitchers, season_pitchers, career_pitches, season_pitches
+    # Set env var: PITCH_PROFILER_API_KEY before running any challenge below.
     {
         "id": "pandas_basics",
         "phase": "Phase 2: Data & Analytics",
@@ -249,14 +252,14 @@ CURRICULUM = [
             "df.value_counts() counts unique values in a Series."
         ),
         "challenge": (
-            "Build a function inspect_dataframe(df: pd.DataFrame) -> dict "
-            "that returns a summary dict with keys: "
-            "'shape' (tuple), 'columns' (list), 'dtypes' (dict of col→dtype as string), "
-            "'null_counts' (dict of col→null_count, only cols with nulls), "
-            "'numeric_summary' (result of describe() as a dict for numeric cols only). "
-            "Then create a sample DataFrame of 20 BPA records with columns: "
-            "agreement_number, supplier, amount, status, created_date — "
-            "include some nulls in amount — and run your function on it."
+            "Load real pitcher data: from baseball_data import career_pitchers; df = career_pitchers(). "
+            "This returns 100+ columns of pitching metrics (ERA, whiff_pct, stuff_rv, arm_angle, etc.). "
+            "Build a function inspect_dataframe(df) -> dict with keys: "
+            "'shape', 'numeric_cols' (count), 'string_cols' (count), "
+            "'null_summary' (only cols with >5% nulls, showing pct), "
+            "'top_numeric_ranges' (min/max for era, whiff_pct, stuff_rv, k_pct). "
+            "Then print the 5 pitchers with the highest stuff_rv and the 5 with the lowest ERA "
+            "(min 50 IP — filter first). Show only: pitcher_name, team, era, whiff_pct, stuff_rv."
         ),
     },
     {
@@ -273,14 +276,14 @@ CURRICULUM = [
             "pd.to_datetime() converts string dates; then .dt.year, .dt.month, etc."
         ),
         "challenge": (
-            "Given a BPA DataFrame with columns: agreement_number, supplier, amount, status, created_date. "
-            "Write queries to: "
-            "(1) filter Active BPAs over $10,000, "
-            "(2) find all BPAs from suppliers whose name contains 'Corp' (case-insensitive), "
-            "(3) add a column 'age_days' = days since created_date to today, "
-            "(4) add a column 'tier' = 'High' if amount > 50000, 'Mid' if > 10000, else 'Low' — "
-            "use pd.cut() or np.select() instead of a loop. "
-            "Show the result of each step."
+            "Load: from baseball_data import career_pitchers; df = career_pitchers(). "
+            "Do all four without loops: "
+            "(1) Filter to qualified starters: ip >= 162 and starts >= 25. "
+            "(2) From that group, find pitchers whose team name contains 'Sox' (case-insensitive). "
+            "(3) Add a column 'stuff_tier': 'Elite' if stuff_rv > 5, 'Above Avg' if > 0, else 'Below Avg' "
+            "— use np.select(), not apply(). "
+            "(4) Add 'k_bb_ratio' = k_pct / bb_pct (handle division by zero with np.where). "
+            "Print shape after each filter and show the top 10 Elite starters sorted by k_bb_ratio."
         ),
     },
     {
@@ -297,13 +300,14 @@ CURRICULUM = [
             "reset_index() brings groupby keys back as columns."
         ),
         "challenge": (
-            "Given a BPA DataFrame with: agreement_number, supplier, amount, status, category, created_date. "
-            "Compute: "
-            "(1) total amount and BPA count per supplier (reset index), sorted by total desc, "
-            "(2) each BPA's share of its supplier's total (use transform), "
-            "(3) a pivot table of total amount with supplier as rows and status as columns, "
-            "fill NaN with 0. "
-            "Print all three results."
+            "Load: from baseball_data import career_pitchers, career_pitches; "
+            "pitchers = career_pitchers(); pitches = career_pitches(). "
+            "(1) Group pitchers by team: compute mean ERA, mean whiff_pct, mean stuff_rv, pitcher count. "
+            "Sort by mean stuff_rv descending. Which team has the best stuff? "
+            "(2) Use transform to add 'era_vs_team_avg' = each pitcher's ERA minus their team's mean ERA. "
+            "Show the 5 pitchers furthest below their team average (best relative performance). "
+            "(3) From the pitches DataFrame, build a pivot table: pitch_type as rows, team as columns, "
+            "values = mean whiff_pct. Fill NaN with 0. Which pitch type generates the most whiffs league-wide?"
         ),
     },
     {
@@ -320,15 +324,14 @@ CURRICULUM = [
             "After merging, always check shape — unexpected duplicates mean many-to-many."
         ),
         "challenge": (
-            "You have two DataFrames: "
-            "bpas (agreement_number, supplier_id, amount) and "
-            "suppliers (supplier_id, supplier_name, category, region). "
-            "Create sample data with 10 BPAs and 8 suppliers (2 BPAs have no matching supplier). "
-            "Do: (1) inner join to get only matched BPAs with supplier details, "
-            "(2) left join to keep all BPAs and show null where supplier is missing, "
-            "(3) add a second supplier DataFrame with updated categories and concat them, "
-            "deduplicating by supplier_id keeping the last occurrence. "
-            "Print shape before and after each operation."
+            "Load: from baseball_data import career_pitchers, career_pitches, season_pitchers; "
+            "career = career_pitchers(); pitches = career_pitches(); s2024 = season_pitchers(2024). "
+            "(1) Inner-join career pitchers with career_pitches on pitcher_name (or pitcher_id if available). "
+            "Print shape before/after — did you get duplicates? Why or why not? "
+            "(2) Left-join career onto s2024 to find pitchers who have career data but no 2024 season "
+            "(retired or injured). How many? "
+            "(3) Concat s2024 with season_pitchers(2023), add a 'season' column to each before concat. "
+            "Then find pitchers who appear in both seasons and compute their ERA change year-over-year."
         ),
     },
     {
@@ -346,13 +349,14 @@ CURRICULUM = [
             "Avoid Python loops over numpy arrays — that negates all the speed."
         ),
         "challenge": (
-            "Given a numpy array of 10,000 BPA amounts (random floats between 100 and 100,000). "
+            "Load: from baseball_data import career_pitchers; df = career_pitchers(). "
+            "Extract these as numpy arrays: era = df['era'].values, whiff = df['whiff_pct'].values, "
+            "stuff = df['stuff_rv'].values (drop NaNs first with dropna on those cols). "
             "Without any Python loops: "
-            "(1) compute mean, std, min, max, and 25/50/75th percentiles, "
-            "(2) create a 'tier' array using np.select: 'High' if >50k, 'Mid' if >10k, else 'Low', "
-            "(3) apply a 3% discount to all amounts above the 90th percentile using np.where, "
-            "(4) compute the total savings from that discount. "
-            "Time the entire operation with time.perf_counter()."
+            "(1) Compute mean, std, and 10/50/90th percentiles for all three metrics. "
+            "(2) Build a composite 'ace_score' = (stuff / stuff.std()) + (whiff / whiff.std()) - (era / era.std()). "
+            "(3) Classify pitchers: np.select — 'Ace' if ace_score > 2, 'Solid' if > 0, else 'Replacement'. "
+            "(4) Count pitchers in each tier and print results. Time the whole thing."
         ),
     },
     {
@@ -370,13 +374,15 @@ CURRICULUM = [
             "For DataFrames, plotly express accepts df directly: px.bar(df, x='col', y='val', color='cat')."
         ),
         "challenge": (
-            "Build two charts from a BPA summary DataFrame (supplier, total_amount, bpa_count, avg_amount): "
-            "(1) matplotlib: a horizontal bar chart of top 10 suppliers by total_amount, "
-            "bars colored by whether total > $100k (green) or not (steelblue), "
-            "with value labels on each bar, clean gridlines, titled properly. "
-            "(2) plotly: an interactive scatter plot of bpa_count (x) vs total_amount (y), "
-            "size=avg_amount, color=supplier, hover shows all fields. "
-            "Save the plotly chart as 'bpa_analysis.html'."
+            "Load: from baseball_data import career_pitchers, career_pitches; "
+            "df = career_pitchers(); pitches = career_pitches(). "
+            "Build two charts: "
+            "(1) matplotlib: scatter plot of stuff_rv (x) vs whiff_pct (y) for qualified starters (ip >= 100). "
+            "Color points by stuff_tier (Elite/Above Avg/Below Avg). Add pitcher name labels for top 10 by stuff_rv. "
+            "Clean axes, title 'Stuff+ vs Whiff Rate — Career', legend. "
+            "(2) plotly: bar chart of mean whiff_pct by pitch_type from the pitches DataFrame, "
+            "sorted descending, colored by pitch_type, hover shows pitch count and mean spin_rate. "
+            "Save as 'pitch_profiler_analysis.html'."
         ),
     },
     {
@@ -388,18 +394,21 @@ CURRICULUM = [
             "session = requests.Session(); session.headers.update({'Authorization': ...}). "
             "response.raise_for_status() raises on 4xx/5xx — always call it. "
             "response.json() parses JSON automatically. "
-            "For Oracle Fusion: auth is Basic (username:password base64) or OAuth token. "
-            "Pagination: Oracle REST uses 'hasMore' and 'offset' — loop until hasMore is False. "
+            "Pagination: many REST APIs use offset/limit or 'hasMore' — loop until done. "
+            "Caching: save responses to disk so you don't hammer the API during development. "
             "Rate limits: use time.sleep() or exponential backoff on 429 responses."
         ),
         "challenge": (
-            "Write an OracleRestClient class that: "
-            "(1) takes base_url, username, password in __init__ and sets up a requests.Session "
-            "with Basic auth and 'Content-Type: application/json' header, "
-            "(2) has a get_all(resource_path, q_filter='') method that handles Oracle pagination "
-            "(loops while hasMore=True, uses offset parameter, collects all items into a list), "
-            "(3) raises a custom OracleAPIError on non-200 responses with the status code and message. "
-            "Write it so it could realistically call /fscmRestApi/resources/11.13.18.05/purchaseAgreements."
+            "Rewrite the Pitch Profiler client from scratch (don't import baseball_data). "
+            "Build a PitchProfilerClient class: "
+            "(1) __init__(self, api_key: str) — stores key, creates requests.Session. "
+            "(2) _get(self, endpoint: str) -> list[dict] — calls the API, calls raise_for_status(), "
+            "returns response.json()['items']. Raises PitchProfilerError on failure. "
+            "(3) career_pitchers(self) -> pd.DataFrame — calls GET_CAREER_PITCHERS/{key}, returns DataFrame. "
+            "(4) season_pitchers(self, season: int) -> pd.DataFrame — same for seasonal endpoint. "
+            "(5) Add file-based caching: check Path(f'~/.pp_cache/{endpoint}.json').expanduser() first; "
+            "write to it on a live fetch. "
+            "The base URL: https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com/ords/admin/patreon"
         ),
     },
     {
@@ -408,7 +417,7 @@ CURRICULUM = [
         "title": "pandas Performance: Profiling & Optimizing",
         "concept": (
             "Category dtype for low-cardinality string columns cuts memory 10x+: df['status'].astype('category'). "
-            "Downcasting numerics: pd.to_numeric(df['col'], downcast='integer'). "
+            "Downcasting numerics: pd.to_numeric(df['col'], downcast='float'). "
             "df.memory_usage(deep=True) shows actual memory per column. "
             "Avoid apply() on large DataFrames — it's a Python loop. Use vectorized operations instead. "
             "df.query() is faster than boolean indexing on large frames. "
@@ -416,14 +425,15 @@ CURRICULUM = [
             "chunksize= in read_csv lets you process huge files in batches."
         ),
         "challenge": (
-            "Given a DataFrame with 100,000 BPA records and columns: "
-            "agreement_number (str), supplier (str, ~50 unique values), "
-            "status (str, 4 unique values), amount (float64), line_count (int64). "
-            "(1) Show memory usage before optimization. "
-            "(2) Convert supplier and status to category, downcast line_count to int16. "
-            "(3) Show memory usage after — calculate % reduction. "
-            "(4) Replace an apply-based calculation (amount per line = amount/line_count) "
-            "with a vectorized equivalent and benchmark both with timeit."
+            "Load: from baseball_data import career_pitchers; df = career_pitchers(). "
+            "This DataFrame has 100+ columns — a perfect optimization target. "
+            "(1) Print total memory usage in MB before optimization. "
+            "(2) Identify all string columns with fewer than 50 unique values and convert to category. "
+            "(3) Downcast all float64 columns to float32 and all int64 to int32 where safe "
+            "(check for value overflow before casting). "
+            "(4) Print memory after — what's the % reduction? "
+            "(5) The slow way: use apply() to compute 'era_label' = 'Good' if era < 3.5 else 'Average' if < 4.5 else 'Poor'. "
+            "The fast way: use np.select(). Benchmark both with timeit on 10 iterations."
         ),
     },
     {
@@ -440,14 +450,15 @@ CURRICULUM = [
             "This pattern makes testing trivial — test each transform independently."
         ),
         "challenge": (
-            "Build a BPA data pipeline with these steps as separate functions: "
-            "(1) clean_amounts: remove rows where amount is null or <= 0, "
-            "(2) add_tier: add tier column (High/Mid/Low as before), "
-            "(3) add_supplier_rank: add a column ranking supplier by total amount (1=highest), "
-            "(4) flag_large_bpas: add boolean column is_large if amount > 75th percentile. "
-            "Chain them using DataFrame.pipe(). "
-            "Add a run_pipeline(df, steps, verbose=True) function that logs shape "
-            "after each step when verbose=True."
+            "Load: from baseball_data import career_pitchers; raw = career_pitchers(). "
+            "Build a pitcher analysis pipeline with these steps as separate functions: "
+            "(1) filter_qualified(df, min_ip=50): drop pitchers below min_ip threshold. "
+            "(2) add_stuff_tier(df): add 'stuff_tier' column (Elite/Above Avg/Below Avg) from stuff_rv. "
+            "(3) add_ace_score(df): add composite 'ace_score' = normalized stuff_rv + whiff_pct - era (z-scores). "
+            "(4) rank_pitchers(df): add 'rank' column (1 = best ace_score). "
+            "(5) select_report_cols(df): keep only pitcher_name, team, era, whiff_pct, stuff_rv, stuff_tier, ace_score, rank. "
+            "Chain with .pipe(). Add run_pipeline(df, steps, verbose=True) that prints shape after each step. "
+            "Final output: top 20 pitchers by ace_score."
         ),
     },
     {
@@ -464,14 +475,16 @@ CURRICULUM = [
             "Cross-validate before trusting a single train/test split."
         ),
         "challenge": (
-            "Build a minimal but complete XGBoost pipeline for predicting BPA tier (High/Mid/Low): "
-            "features: supplier_rank, amount, line_count, age_days, is_large. "
-            "Steps: (1) generate 1000 rows of synthetic data, "
-            "(2) encode the target (tier) with LabelEncoder, "
-            "(3) split 80/20, "
-            "(4) train XGBClassifier with early stopping on the validation set, "
-            "(5) print accuracy, classification_report, and the top 3 feature importances. "
-            "Keep it under 50 lines."
+            "Load: from baseball_data import career_pitchers; df = career_pitchers(). "
+            "Goal: predict stuff_tier (Elite / Above Avg / Below Avg) from other pitching metrics. "
+            "Steps: "
+            "(1) Filter to pitchers with ip >= 50. Drop rows where stuff_rv is null (that's the source of the label). "
+            "(2) Build stuff_tier target from stuff_rv as before. "
+            "(3) Features: era, whiff_pct, k_pct, bb_pct, arm_angle, extension — drop nulls in these cols. "
+            "(4) LabelEncode the target. Split 80/20 stratified. "
+            "(5) Train XGBClassifier with early_stopping_rounds=20 on the val set. "
+            "(6) Print accuracy, classification_report, and top 5 feature importances with a horizontal bar chart. "
+            "Bonus: does arm_angle matter for predicting stuff tier?"
         ),
     },
 ]
@@ -482,8 +495,17 @@ extensions, sports analytics (baseball/march madness), and AI agents.
 Ian's background: intermediate Python, working with Oracle REST APIs, pandas, XGBoost, and building
 Claude-powered agents. He wants to become more efficient and idiomatic in Python and data work.
 
+Phase 2 data context — Pitch Profiler API (baseball pitching analytics):
+- Base URL: https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com/ords/admin/patreon
+- Endpoints: GET_CAREER_PITCHERS, GET_CAREER_PITCHES, GET_SEASON_PITCHERS/{season},
+  GET_TEAM_SEASON_PITCHERS/{season}, GET_SEASON_PITCHES/{season}, GET_TEAM_SEASON_PITCHES/{season}
+- Key metrics in the data: era, whiff_pct, stuff_rv, pitching_rv, command_rv, k_pct, bb_pct,
+  arm_angle, extension, spin_rate, ip, starts, pitcher_name, team
+- baseball_data.py is a helper module in the project that wraps this API with caching
+- Import pattern: from baseball_data import career_pitchers, season_pitchers, career_pitches
+
 Your teaching style:
-- Concrete, practical, domain-relevant examples (BPA data, procurement, baseball stats)
+- Concrete, practical examples using the Pitch Profiler data where relevant to Phase 2 lessons
 - Show WHY something is better, not just that it is
 - Point out common mistakes before Ian makes them
 - Be direct and concise — no filler

@@ -3,10 +3,11 @@
 A personal coding tutor that runs in your terminal, powered by the Claude API.
 
 **20 lessons across two phases:**
-- Phase 1: Python Efficiency (comprehensions, builtins, pathlib, collections, itertools, profiling, and more)
-- Phase 2: Data & Analytics (pandas, numpy, matplotlib/plotly, REST APIs, XGBoost)
+- Phase 1: Python Efficiency — comprehensions, builtins, pathlib, collections, itertools, profiling, and more
+- Phase 2: Data & Analytics — real baseball pitching data (Pitch Profiler API), pandas, numpy, matplotlib/plotly, REST APIs, XGBoost
 
-Exercises are tailored to real-world work: Oracle Fusion BPA data, procurement APIs, and analytics.
+Phase 2 uses real pitcher statistics (ERA, whiff rate, stuff+, arm angle, spin rate, and 100+ other metrics)
+from the Pitch Profiler API instead of synthetic data.
 
 ## Setup
 
@@ -21,13 +22,11 @@ Exercises are tailored to real-world work: Oracle Fusion BPA data, procurement A
    pip install -r requirements.txt
    ```
 
-3. **Set your Anthropic API key**
+3. **Set environment variables**
    ```
-   # Windows
-   set ANTHROPIC_API_KEY=your-key-here
-
-   # Mac/Linux
-   export ANTHROPIC_API_KEY=your-key-here
+   # Windows — run both in your terminal before starting the tutor
+   set ANTHROPIC_API_KEY=your-anthropic-key-here
+   set PITCH_PROFILER_API_KEY=your-pitch-profiler-key-here
    ```
 
 4. **Run the tutor**
@@ -37,7 +36,23 @@ Exercises are tailored to real-world work: Oracle Fusion BPA data, procurement A
 
 ## How it works
 
-- Progress is saved locally in `~/.coding_tutor_progress.json` — it persists between sessions
+- Progress is saved locally in `~/.coding_tutor_progress.json` — persists between sessions
+- Pitch Profiler API responses are cached in `~/.coding_tutor_cache/baseball/` — no repeated API calls
 - Each lesson: concept explanation → coding challenge → Claude reviews your code
 - Type `SKIP` to skip a challenge, `DONE` on a blank line to submit your code
 - You can retry any lesson or jump to a specific one from the menu
+
+## Test your data connection
+
+```
+python baseball_data.py
+```
+
+This fetches career pitcher data and prints the first few rows to confirm the API is working.
+
+## Clearing the data cache
+
+```python
+from baseball_data import clear_cache
+clear_cache()
+```
