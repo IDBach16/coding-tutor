@@ -1,524 +1,570 @@
+"""
+Interactive Python/R Coding Tutor — Powered by Claude
+Full course using real Pitch Profiler MLB pitching data throughout.
+"""
+
+import json
 import os
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+from pathlib import Path
+import anthropic
 import streamlit as st
 
-# ── Page config ────────────────────────────────────────────────────────────
+# ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Pitch Profiler Analytics",
+    page_title="Pitch Profiler Coding Tutor",
     page_icon="⚾",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-API_KEY_ENV = "PITCH_PROFILER_API_KEY"
-BASE_URL = (
-    "https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com"
-    "/ords/admin/patreon"
-)
+PROGRESS_FILE = Path.home() / ".pp_tutor_progress.json"
 
-# ── Data loading ────────────────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def load_career_pitchers(api_key: str) -> pd.DataFrame:
-    import requests
-    r = requests.get(f"{BASE_URL}/GET_CAREER_PITCHERS/{api_key}", timeout=30)
-    r.raise_for_status()
-    return pd.json_normalize(r.json().get("items", []))
-
-
-@st.cache_data(ttl=3600)
-def load_career_pitches(api_key: str) -> pd.DataFrame:
-    import requests
-    r = requests.get(f"{BASE_URL}/GET_CAREER_PITCHES/{api_key}", timeout=30)
-    r.raise_for_status()
-    return pd.json_normalize(r.json().get("items", []))
-
-
-@st.cache_data(ttl=3600)
-def load_season_pitchers(api_key: str, season: int) -> pd.DataFrame:
-    import requests
-    r = requests.get(f"{BASE_URL}/GET_SEASON_PITCHERS/{season}/{api_key}", timeout=30)
-    r.raise_for_status()
-    return pd.json_normalize(r.json().get("items", []))
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────────
-DISPLAY_COLS = [
-    "pitcher_name", "p_throws", "innings_pitched", "era", "fip", "whip",
-    "stuff_plus", "location_plus", "pitching_plus",
-    "whiff_rate", "strike_out_percentage", "walk_percentage",
-    "barrel_percentage", "primary_fb_velo", "arm_angle",
+# ── Curriculum ───────────────────────────────────────────────────────────────
+CURRICULUM = [
+    {
+        "phase": "🚀 Getting Started",
+        "lessons": [
+            {
+                "id": "gs_01",
+                "title": "Your First API Call",
+                "goal": "Fetch MLB pitcher data from the Pitch Profiler API and load it into a table",
+                "concepts": ["HTTP GET requests", "JSON responses", "Creating a DataFrame / tibble"],
+                "data": "GET_CAREER_PITCHERS — 1,659 pitchers, 103 columns",
+            },
+            {
+                "id": "gs_02",
+                "title": "Exploring the Dataset",
+                "goal": "Understand what's in the 103-column dataset before touching it",
+                "concepts": ["Shape / dimensions", "Column types", "Missing values", "Summary statistics"],
+                "data": "career_pitchers — era, stuff_plus, whiff_rate, arm_angle, primary_fb_velo",
+            },
+        ],
+    },
+    {
+        "phase": "🔧 Data Wrangling",
+        "lessons": [
+            {
+                "id": "dw_01",
+                "title": "Filtering Pitchers",
+                "goal": "Select subsets: qualified starters, lefties, high-whiff arms",
+                "concepts": ["Boolean filtering", "Multiple conditions (&, |)", "query() vs filter()"],
+                "data": "Filter to IP >= 162, p_throws == 'L', whiff_rate > 0.30",
+            },
+            {
+                "id": "dw_02",
+                "title": "Creating New Columns",
+                "goal": "Derive K-BB%, stuff tier, and a composite ace score",
+                "concepts": ["Column assignment", "Conditional columns", "np.select / case_when", "Vectorized math"],
+                "data": "K-BB% = k_pct - bb_pct, stuff_tier from stuff_plus, ace_score composite",
+            },
+            {
+                "id": "dw_03",
+                "title": "Grouping & Summarizing",
+                "goal": "Aggregate stats by handedness, stuff tier, or any grouping",
+                "concepts": ["groupby / group_by + summarise", "Multiple aggregations", "Named aggregations"],
+                "data": "Mean ERA by stuff_tier, avg velo by p_throws, pitch count by pitch_type",
+            },
+            {
+                "id": "dw_04",
+                "title": "Joining Datasets",
+                "goal": "Combine career_pitchers with career_pitches to analyze full arsenals",
+                "concepts": ["Inner / left joins", "Merge on pitcher_id", "Checking for duplicates after joining"],
+                "data": "career_pitchers + career_pitches joined on pitcher_name or pitcher_id",
+            },
+        ],
+    },
+    {
+        "phase": "📊 Visualization",
+        "lessons": [
+            {
+                "id": "viz_01",
+                "title": "Bar Charts & Rankings",
+                "goal": "Show top 20 pitchers by stuff+ with a clean horizontal bar chart",
+                "concepts": ["Horizontal bar charts", "Color by value", "Value labels", "Sorting"],
+                "data": "Top 20 stuff_plus leaders; ERA leaders among qualified starters",
+            },
+            {
+                "id": "viz_02",
+                "title": "Scatter Plots & Correlations",
+                "goal": "Explore relationships between metrics — stuff+ vs whiff rate, arm angle vs velo",
+                "concepts": ["Scatter plots", "Color/size encoding", "Trendlines", "Correlation"],
+                "data": "stuff_plus vs whiff_rate, arm_angle vs primary_fb_velo, era vs fip",
+            },
+            {
+                "id": "viz_03",
+                "title": "Distributions & Pitch Arsenal",
+                "goal": "Visualize arm angle distribution and a pitcher's pitch mix",
+                "concepts": ["Histograms", "Box plots by group", "Pie / donut charts", "Faceting"],
+                "data": "arm_angle distribution, pitch_type usage % (career_pitches), whiff by pitch_type",
+            },
+        ],
+    },
+    {
+        "phase": "🔬 Advanced Analysis",
+        "lessons": [
+            {
+                "id": "adv_01",
+                "title": "Arm Angle Analysis",
+                "goal": "Understand how arm slot affects velo, movement, and outcomes",
+                "concepts": ["Binning with pd.cut / cut()", "Group comparisons", "Annotated scatter plots"],
+                "data": "arm_angle bucketed: Submarine < 0, Sidearm 0-20, Low 3/4 20-30, 3/4 30-45, Overhand > 45",
+            },
+            {
+                "id": "adv_02",
+                "title": "Pitch Arsenal Deep Dive",
+                "goal": "Rank pitch types by effectiveness — whiff rate, run value, usage",
+                "concepts": ["Multi-level groupby", "Ranking within groups", "Heatmaps"],
+                "data": "career_pitches — stuff_plus and whiff_rate by pitch_type across the league",
+            },
+            {
+                "id": "adv_03",
+                "title": "Building a Pitcher Scouting Report",
+                "goal": "Build a complete pitcher profile: stats + arsenal + percentile ranks vs league",
+                "concepts": ["Percentile ranks", "Combining DataFrames", "Clean output formatting"],
+                "data": "Any pitcher from the dataset — overall stats + pitch mix + league comparison",
+            },
+        ],
+    },
+    {
+        "phase": "🤖 Machine Learning",
+        "lessons": [
+            {
+                "id": "ml_01",
+                "title": "Predicting Stuff+ Tier with XGBoost",
+                "goal": "Classify pitchers as Elite / Above Avg / Below Avg using their metrics",
+                "concepts": ["Train/test split", "Feature engineering", "XGBoost classifier", "Accuracy + classification report"],
+                "data": "Features: era, whiff_rate, primary_fb_velo, arm_angle, k_pct, bb_pct → Target: stuff_tier",
+            },
+            {
+                "id": "ml_02",
+                "title": "Feature Importance & Model Insights",
+                "goal": "Learn which metrics drive the model and whether arm angle matters",
+                "concepts": ["feature_importances_", "Cross-validation", "Model interpretation"],
+                "data": "Feature importance bar chart, does arm_angle predict stuff+?",
+            },
+        ],
+    },
 ]
 
-METRIC_LABELS = {
-    "era": "ERA", "fip": "FIP", "whip": "WHIP",
-    "stuff_plus": "Stuff+", "location_plus": "Location+", "pitching_plus": "Pitching+",
-    "mix_plus": "Mix+", "match_plus": "Match+", "max_plus": "Max+",
-    "whiff_rate": "Whiff%", "strike_out_percentage": "K%", "walk_percentage": "BB%",
-    "strike_out_minus_walk_percentage": "K-BB%",
-    "barrel_percentage": "Barrel%", "hard_hit": "Hard Hit",
-    "ground_ball_percentage": "GB%", "fly_ball_percentage": "FB%",
-    "primary_fb_velo": "FB Velo", "primary_fb_spin_rate": "FB Spin",
-    "arm_angle": "Arm Angle", "release_extension": "Extension",
-    "innings_pitched": "IP", "games_started": "GS",
-    "woba": "wOBA", "xwobacon": "xwOBACON",
-    "run_value_per_100_pitches": "RV/100",
-}
-
-# metrics where lower = better (for coloring / ranking)
-LOWER_IS_BETTER = {"era", "fip", "whip", "walk_percentage", "barrel_percentage", "woba", "xwobacon"}
-
-RADAR_METRICS = [
-    "stuff_plus", "location_plus", "pitching_plus",
-    "whiff_rate", "strike_out_percentage", "walk_percentage",
-    "barrel_percentage", "primary_fb_velo",
+# All lessons as a flat list for navigation
+ALL_LESSONS = [
+    {**lesson, "phase": section["phase"]}
+    for section in CURRICULUM
+    for lesson in section["lessons"]
 ]
-
-PITCH_TYPE_COLORS = {
-    "4-Seam Fastball": "#e63946", "Sinker": "#f4a261",
-    "Cutter": "#e9c46a", "Changeup": "#2a9d8f",
-    "Splitter": "#264653", "Curveball": "#457b9d",
-    "Slider": "#6a4c93", "Sweeper": "#9b2226",
-    "Slurve": "#ae2012", "Knuckleball": "#94d2bd",
-}
+LESSON_IDS = [l["id"] for l in ALL_LESSONS]
 
 
-def pct_rank(series: pd.Series, lower_is_better: bool = False) -> pd.Series:
-    """0–100 percentile rank; 100 = best."""
-    r = series.rank(pct=True) * 100
-    return (100 - r) if lower_is_better else r
+# ── Data & API context ───────────────────────────────────────────────────────
+DATA_CONTEXT = """
+PITCH PROFILER API — Real MLB pitching data
+
+Base URL: https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com/ords/admin/patreon
+
+Endpoints (all return JSON with an "items" array):
+  GET_CAREER_PITCHERS/{api_key}           — 1,659 pitchers, 103 columns, career stats since 2020
+  GET_CAREER_PITCHES/{api_key}            — 25,694 rows, pitch-level career data (one row per pitcher per pitch type)
+  GET_SEASON_PITCHERS/{season}/{api_key}  — single-season pitcher stats (seasons: 2020–2025)
+  GET_TEAM_SEASON_PITCHERS/{season}/{api_key}
+  GET_SEASON_PITCHES/{season}/{api_key}
+  GET_TEAM_SEASON_PITCHES/{season}/{api_key}
+
+KEY career_pitchers COLUMNS:
+  Identity:   pitcher_name, pitcher_id, p_throws (R/L), game_type
+  Workload:   innings_pitched, ip_decimal, games_played, games_started, wins, losses, saves
+  Traditional: era, fip, whip, babip, left_on_base_percentage
+  Stuff grades: stuff_plus, location_plus, pitching_plus, mix_plus, match_plus, max_plus
+                (all centered at 100 = league avg; higher = better)
+  Run values: stuff_run_value_per_100, location_run_value_per_100, pitching_run_value_per_100
+  Outcomes:   strike_out_percentage, walk_percentage, strike_out_minus_walk_percentage,
+              whiff_rate (raw: 0.0–1.0 decimal), strikeouts_per_9, walks_per_9
+  Batted ball: barrel_percentage, hard_hit, ground_ball_percentage, fly_ball_percentage
+  Physical:   arm_angle (degrees; submarine ≈ -150 to overhand ≈ 108),
+              primary_fb_velo, primary_fb_spin_rate, release_extension
+  Quality of contact: woba, wobacon, xwobacon, run_value_per_100_pitches
+  Zone:       heart_percentage, shadow_percentage, chase_percentage, zone_percentage
+
+KEY career_pitches COLUMNS:
+  pitcher_name, pitcher_id, p_throws, pitch_type, pitch_group
+  thrown, percentage_thrown
+  velocity, spin_rate, ivb (induced vert break), hb (horiz break), vaa, haa
+  whiff_rate, stuff_plus, location_plus, pitching_plus
+  run_value_per_100_pitches, woba, barrel_percentage
+  primary_fb_flag, pitch_rk (rank of pitch in arsenal)
+
+NOTES:
+- whiff_rate in raw data is 0.0–1.0 (multiply by 100 for %)
+- stuff_plus > 100 = above average, < 100 = below average
+- arm_angle: negative = submarine/sidearm (below horizontal), positive = overhand
+- No "team" column in the data — pitcher_name and pitcher_id are the identifiers
+"""
+
+PYTHON_ENV = """
+PYTHON ENVIRONMENT:
+The project has baseball_data.py with these helper functions (handles caching automatically):
+  from baseball_data import career_pitchers, career_pitches, season_pitchers
+  df = career_pitchers()   # returns pd.DataFrame
+
+Or raw requests (teach this in early lessons):
+  import requests, pandas as pd
+  BASE = "https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com/ords/admin/patreon"
+  r = requests.get(f"{BASE}/GET_CAREER_PITCHERS/{api_key}")
+  df = pd.json_normalize(r.json()['items'])
+
+Available packages: requests, pandas, numpy, matplotlib, plotly, xgboost, scikit-learn, statsmodels
+"""
+
+R_ENV = """
+R ENVIRONMENT:
+Use httr + jsonlite for API calls, tidyverse for wrangling and visualization:
+  library(httr); library(jsonlite); library(tidyverse)
+  base_url <- "https://g837e5a6fbcb0dd-ch2sockkby63dgzo.adb.us-chicago-1.oraclecloudapps.com/ords/admin/patreon"
+  resp <- GET(paste0(base_url, "/GET_CAREER_PITCHERS/", api_key))
+  df <- fromJSON(content(resp, "text", encoding="UTF-8"))$items %>% as_tibble()
+
+Key packages: tidyverse (dplyr, ggplot2, tidyr, stringr), httr, jsonlite, xgboost, skimr
+dplyr pipe: use |> (native R 4.1+) or %>% (magrittr)
+dplyr verbs: filter(), select(), mutate(), group_by(), summarise(), arrange(), left_join(), case_when()
+ggplot2 for all visualization
+"""
 
 
-def fmt(val, col: str) -> str:
-    if pd.isna(val):
-        return "—"
-    if col in ("era", "fip", "whip", "woba", "xwobacon"):
-        return f"{val:.3f}"
-    if col in ("whiff_rate",):
-        return f"{val:.1%}"
-    if "percentage" in col:
-        return f"{val * 100:.1f}%" if val <= 1 else f"{val:.1f}%"
-    if col in ("primary_fb_velo",):
-        return f"{val:.1f}"
-    if col in ("arm_angle",):
-        return f"{val:.0f}°"
-    if col in ("stuff_plus", "location_plus", "pitching_plus", "mix_plus", "match_plus", "max_plus"):
-        return f"{val:.1f}"
-    return f"{val:.1f}"
+# ── Progress helpers ─────────────────────────────────────────────────────────
+def load_progress() -> dict:
+    if PROGRESS_FILE.exists():
+        try:
+            return json.loads(PROGRESS_FILE.read_text())
+        except Exception:
+            pass
+    return {"completed": []}
 
 
-def metric_card(label: str, value: str, delta: str = ""):
-    st.metric(label=label, value=value, delta=delta if delta else None)
+def save_progress(progress: dict) -> None:
+    PROGRESS_FILE.write_text(json.dumps(progress, indent=2))
 
 
-# ── Sidebar ─────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("⚾ Pitch Profiler")
-    st.divider()
+# ── Session state init ───────────────────────────────────────────────────────
+if "language" not in st.session_state:
+    st.session_state.language = "Python"
+if "lesson_idx" not in st.session_state:
+    st.session_state.lesson_idx = 0
+if "generated" not in st.session_state:
+    st.session_state.generated = {}      # lesson_id → generated content string
+if "chat" not in st.session_state:
+    st.session_state.chat = {}           # lesson_id → list of {role, content}
+if "progress" not in st.session_state:
+    st.session_state.progress = load_progress()
+if "hints_shown" not in st.session_state:
+    st.session_state.hints_shown = {}   # lesson_id → bool
+if "show_challenge" not in st.session_state:
+    st.session_state.show_challenge = {}
 
-    api_key = st.text_input(
-        "API Key",
-        value=os.environ.get(API_KEY_ENV, ""),
-        type="password",
-        help="Your Pitch Profiler API key",
+
+# ── Claude helpers ───────────────────────────────────────────────────────────
+def make_client(api_key: str) -> anthropic.Anthropic:
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def lesson_system_prompt(lesson: dict, language: str) -> str:
+    env = PYTHON_ENV if language == "Python" else R_ENV
+    lang_note = (
+        "Use Python with pandas, plotly, and requests throughout."
+        if language == "Python"
+        else "Use R with tidyverse (dplyr, ggplot2), httr, and jsonlite throughout."
     )
+    return f"""You are an expert {language} coding tutor teaching Ian Bach to code using real MLB pitching data
+from the Pitch Profiler API. Ian is an intermediate developer comfortable with Oracle REST APIs and
+general programming, but building {language} data skills.
 
-    if not api_key:
-        st.warning("Enter your API key to load data.")
-        st.stop()
+{DATA_CONTEXT}
 
-    st.divider()
-    st.subheader("Filters")
-    min_ip = st.slider("Min Innings Pitched", 0, 200, 20, step=5)
-    hand = st.multiselect("Handedness", ["R", "L"], default=["R", "L"])
-    st.divider()
-    season_options = [2020, 2021, 2022, 2023, 2024, 2025]
-    selected_season = st.selectbox("Season data (Profile tab)", season_options, index=5)
+{env}
 
+Current lesson: "{lesson['title']}"
+Learning goal: {lesson['goal']}
+Key concepts to cover: {', '.join(lesson['concepts'])}
+Data focus: {lesson['data']}
 
-# ── Load data ───────────────────────────────────────────────────────────────
-with st.spinner("Loading pitcher data..."):
-    try:
-        df_raw = load_career_pitchers(api_key)
-        df_pitches = load_career_pitches(api_key)
-    except Exception as e:
-        st.error(f"Failed to load data: {e}")
-        st.stop()
-
-df = df_raw.copy()
-df = df[df["innings_pitched"] >= min_ip]
-if hand:
-    df = df[df["p_throws"].isin(hand)]
-
-# Whiff rate: convert to 0–100 scale if it's 0–1
-if df["whiff_rate"].max() <= 1:
-    df["whiff_rate"] = df["whiff_rate"] * 100
-    df_pitches["whiff_rate"] = df_pitches["whiff_rate"] * 100
-
-# K% / BB% same
-for col in ["strike_out_percentage", "walk_percentage", "barrel_percentage",
-            "ground_ball_percentage", "fly_ball_percentage", "line_drive_percentage"]:
-    if col in df.columns and df[col].max() <= 1:
-        df[col] = df[col] * 100
-
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📋 Leaderboard",
-    "🎯 Pitcher Profile",
-    "📈 Scatter Explorer",
-    "💪 Arm Angle Lab",
-])
+Teaching rules:
+- {lang_note}
+- Every code example MUST use the Pitch Profiler data — no toy datasets or iris/mtcars
+- Be concrete: show actual column names, actual output examples
+- Code must be complete and runnable
+- Explain WHY, not just what — give context for why a technique matters for this data
+- Keep explanations tight — don't pad. One clear sentence beats two vague ones
+- When reviewing code: lead with what's right, then one specific improvement with corrected code
+- Always give a "Key Takeaway" at the end: one sentence the student should remember"""
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — LEADERBOARD
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.header("Leaderboard")
+def chat_system_prompt(lesson: dict, language: str) -> str:
+    env = PYTHON_ENV if language == "Python" else R_ENV
+    return f"""You are a {language} coding tutor helping Ian Bach with a specific lesson.
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        sort_metric = st.selectbox(
-            "Sort by",
-            options=[k for k in METRIC_LABELS if k in df.columns],
-            format_func=lambda x: METRIC_LABELS.get(x, x),
-            index=list(METRIC_LABELS.keys()).index("stuff_plus") if "stuff_plus" in METRIC_LABELS else 0,
-        )
-    with col2:
-        top_n = st.slider("Show top N", 10, 100, 30, step=5)
-    with col3:
-        asc = sort_metric in LOWER_IS_BETTER
-        st.markdown(f"**Sort order:** {'↑ Ascending (lower = better)' if asc else '↓ Descending (higher = better)'}")
+{DATA_CONTEXT}
 
-    # League leader cards
-    st.subheader("League Leaders")
-    ldr_cols = st.columns(5)
-    leader_metrics = ["stuff_plus", "whiff_rate", "era", "strike_out_percentage", "primary_fb_velo"]
-    for i, m in enumerate(leader_metrics):
-        if m not in df.columns:
-            continue
-        asc_m = m in LOWER_IS_BETTER
-        leader_row = df.sort_values(m, ascending=asc_m).iloc[0]
-        ldr_cols[i].metric(
-            label=METRIC_LABELS.get(m, m),
-            value=fmt(leader_row[m], m),
-            delta=leader_row["pitcher_name"],
-            delta_color="off",
-        )
+{env}
 
-    st.divider()
+Current lesson: "{lesson['title']}" — Goal: {lesson['goal']}
+Concepts: {', '.join(lesson['concepts'])}
 
-    # Table
-    display_cols = [c for c in DISPLAY_COLS if c in df.columns]
-    df_sorted = df.sort_values(sort_metric, ascending=asc).head(top_n)[display_cols].copy()
-
-    rename_map = {c: METRIC_LABELS.get(c, c) for c in display_cols}
-    st.dataframe(
-        df_sorted.rename(columns=rename_map).reset_index(drop=True),
-        use_container_width=True,
-        height=500,
-    )
-
-    # Bar chart of sort metric
-    st.subheader(f"Top {top_n} — {METRIC_LABELS.get(sort_metric, sort_metric)}")
-    fig_bar = px.bar(
-        df_sorted.iloc[::-1] if not asc else df_sorted,
-        x=sort_metric,
-        y="pitcher_name",
-        orientation="h",
-        color=sort_metric,
-        color_continuous_scale="RdYlGn_r" if asc else "RdYlGn",
-        labels={sort_metric: METRIC_LABELS.get(sort_metric, sort_metric), "pitcher_name": ""},
-        height=max(400, top_n * 18),
-    )
-    fig_bar.update_layout(
-        coloraxis_showscale=False,
-        yaxis={"categoryorder": "total ascending" if not asc else "total descending"},
-        margin=dict(l=0, r=20, t=20, b=20),
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
+You are in a Q&A chat. The student is working through code challenges using the Pitch Profiler data.
+- Answer the specific question directly — don't re-teach the whole lesson
+- Show corrected code when relevant, always using the real Pitch Profiler data and column names
+- If they paste code, identify the bug and explain why it happened
+- Keep responses focused. Short and precise beats long and comprehensive."""
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — PITCHER PROFILE
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.header("Pitcher Profile")
+def generate_lesson(client: anthropic.Anthropic, lesson: dict, language: str):
+    """Stream lesson content from Claude."""
+    prompt = f"""Generate a complete lesson for: "{lesson['title']}"
 
-    all_pitchers = sorted(df_raw["pitcher_name"].unique())
-    selected_pitcher = st.selectbox("Select pitcher", all_pitchers)
+Structure your response with these exact sections using markdown headers:
 
-    pitcher_row = df_raw[df_raw["pitcher_name"] == selected_pitcher].iloc[0]
-    pitcher_pitches = df_pitches[df_pitches["pitcher_name"] == selected_pitcher].copy()
+## Concept
+[2-3 focused paragraphs explaining the core idea and WHY it matters for working with this pitching data]
 
-    hand_label = "RHP" if pitcher_row["p_throws"] == "R" else "LHP"
-    st.subheader(f"{selected_pitcher} · {hand_label} · {pitcher_row['innings_pitched']:.1f} IP (Career)")
+## Code Example
+[Complete, runnable {language} code using the Pitch Profiler API data. Use actual column names.
+Add brief inline comments explaining key lines. Should produce visible, interesting output.]
 
-    # Stat cards
-    card_metrics = [
-        ("era", "ERA"), ("fip", "FIP"), ("whip", "WHIP"),
-        ("stuff_plus", "Stuff+"), ("location_plus", "Location+"), ("pitching_plus", "Pitching+"),
-        ("whiff_rate", "Whiff%"), ("strike_out_percentage", "K%"), ("walk_percentage", "BB%"),
-        ("primary_fb_velo", "FB Velo"), ("primary_fb_spin_rate", "FB Spin"), ("arm_angle", "Arm Angle"),
+## Your Challenge
+[A specific coding task the student must complete. Reference real columns and real data from the API.
+Make it slightly harder than the example — one real-world twist added.]
+
+## Hints
+[3 progressive hints, numbered. First hint is gentle, last hint is almost the answer.]
+
+## Key Takeaway
+[One sentence: the single most important thing to remember from this lesson.]"""
+
+    with client.messages.stream(
+        model="claude-opus-4-8",
+        max_tokens=2500,
+        system=lesson_system_prompt(lesson, language),
+        messages=[{"role": "user", "content": prompt}],
+        thinking={"type": "adaptive"},
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
+
+def stream_chat_response(client: anthropic.Anthropic, lesson: dict, language: str, history: list):
+    """Stream a chat response from Claude."""
+    messages = [
+        {"role": m["role"], "content": m["content"]}
+        for m in history
     ]
-    rows = [card_metrics[:6], card_metrics[6:]]
-    for row_metrics in rows:
-        cols = st.columns(6)
-        for i, (col_name, label) in enumerate(row_metrics):
-            if col_name not in pitcher_row.index:
-                continue
-            val = pitcher_row[col_name]
-            # Compute percentile vs filtered df
-            if col_name in df.columns and df[col_name].notna().sum() > 5:
-                pct = pct_rank(df[col_name], lower_is_better=(col_name in LOWER_IS_BETTER))
-                pitcher_pct = pct[df["pitcher_name"] == selected_pitcher]
-                delta_str = f"P{pitcher_pct.values[0]:.0f}" if len(pitcher_pct) else ""
-            else:
-                delta_str = ""
-            cols[i].metric(label=label, value=fmt(val, col_name), delta=delta_str, delta_color="off")
+    with client.messages.stream(
+        model="claude-opus-4-8",
+        max_tokens=1500,
+        system=chat_system_prompt(lesson, language),
+        messages=messages,
+        thinking={"type": "adaptive"},
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
+
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("⚾ Coding Tutor")
+    st.caption("Learn Python or R with real MLB pitching data")
+    st.divider()
+
+    # API keys
+    with st.expander("🔑 API Keys", expanded=False):
+        anthropic_key = st.text_input(
+            "Anthropic API Key",
+            value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            type="password",
+            key="anthropic_key_input",
+        )
+        pp_key = st.text_input(
+            "Pitch Profiler API Key",
+            value=os.environ.get("PITCH_PROFILER_API_KEY", ""),
+            type="password",
+            key="pp_key_input",
+        )
+
+    if not anthropic_key:
+        st.warning("Add your Anthropic API key to begin.")
+        st.stop()
 
     st.divider()
 
-    col_left, col_right = st.columns([1, 1])
+    # Language toggle
+    st.subheader("Language")
+    lang = st.radio(
+        "Select language",
+        ["Python", "R"],
+        horizontal=True,
+        index=0 if st.session_state.language == "Python" else 1,
+        label_visibility="collapsed",
+    )
+    if lang != st.session_state.language:
+        st.session_state.language = lang
+        # Clear generated content so lessons regenerate in the new language
+        st.session_state.generated = {}
+        st.session_state.chat = {}
+        st.rerun()
 
-    # Radar chart
-    with col_left:
-        st.subheader("Percentile Radar")
-        radar_cols = [m for m in RADAR_METRICS if m in df.columns]
-        if radar_cols and selected_pitcher in df["pitcher_name"].values:
-            pct_vals = []
-            for m in radar_cols:
-                pct_series = pct_rank(df[m], lower_is_better=(m in LOWER_IS_BETTER))
-                row_match = df[df["pitcher_name"] == selected_pitcher]
-                pct_vals.append(pct_series[row_match.index[0]] if len(row_match) else 50)
+    st.divider()
 
-            fig_radar = go.Figure(go.Scatterpolar(
-                r=pct_vals + [pct_vals[0]],
-                theta=[METRIC_LABELS.get(m, m) for m in radar_cols] + [METRIC_LABELS.get(radar_cols[0], radar_cols[0])],
-                fill="toself",
-                fillcolor="rgba(99,110,250,0.3)",
-                line=dict(color="#636efa", width=2),
-                name=selected_pitcher,
-            ))
-            fig_radar.update_layout(
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=False,
-                height=380,
-                margin=dict(l=40, r=40, t=40, b=40),
-            )
-            st.plotly_chart(fig_radar, use_container_width=True)
+    # Course navigation
+    st.subheader("Course")
+    completed = set(st.session_state.progress.get("completed", []))
+    total = len(ALL_LESSONS)
+    done = len(completed)
+    st.progress(done / total, text=f"{done}/{total} lessons complete")
+
+    for section in CURRICULUM:
+        st.markdown(f"**{section['phase']}**")
+        for lesson in section["lessons"]:
+            is_done = lesson["id"] in completed
+            is_current = ALL_LESSONS[st.session_state.lesson_idx]["id"] == lesson["id"]
+            icon = "✅" if is_done else ("▶️" if is_current else "○")
+            label = f"{icon} {lesson['title']}"
+            if st.button(label, key=f"nav_{lesson['id']}", use_container_width=True,
+                         type="primary" if is_current else "secondary"):
+                idx = LESSON_IDS.index(lesson["id"])
+                st.session_state.lesson_idx = idx
+                st.rerun()
+
+    st.divider()
+    if st.button("🔄 Reset all progress", type="secondary", use_container_width=True):
+        st.session_state.progress = {"completed": []}
+        save_progress(st.session_state.progress)
+        st.rerun()
+
+
+# ── Main content ─────────────────────────────────────────────────────────────
+client = make_client(anthropic_key)
+lesson = ALL_LESSONS[st.session_state.lesson_idx]
+lesson_id = lesson["id"]
+language = st.session_state.language
+
+# Init per-lesson state
+if lesson_id not in st.session_state.chat:
+    st.session_state.chat[lesson_id] = []
+if lesson_id not in st.session_state.hints_shown:
+    st.session_state.hints_shown[lesson_id] = False
+
+# Header
+col_title, col_nav = st.columns([4, 1])
+with col_title:
+    st.markdown(f"### {lesson['phase']}  ·  {lesson['title']}")
+    st.caption(f"**Goal:** {lesson['goal']}")
+with col_nav:
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("← Prev", disabled=st.session_state.lesson_idx == 0):
+            st.session_state.lesson_idx -= 1
+            st.rerun()
+    with c2:
+        if st.button("Next →", disabled=st.session_state.lesson_idx == len(ALL_LESSONS) - 1):
+            st.session_state.lesson_idx += 1
+            st.rerun()
+
+st.divider()
+
+# ── Lesson content (two-column layout) ──────────────────────────────────────
+left, right = st.columns([3, 2], gap="large")
+
+with left:
+    # Generate or show lesson
+    if lesson_id not in st.session_state.generated:
+        st.info(f"Generating {language} lesson using Pitch Profiler data...")
+        gen_container = st.empty()
+        full_text = ""
+        for chunk in generate_lesson(client, lesson, language):
+            full_text += chunk
+            gen_container.markdown(full_text + "▌")
+        gen_container.markdown(full_text)
+        st.session_state.generated[lesson_id] = full_text
+    else:
+        st.markdown(st.session_state.generated[lesson_id])
+
+    st.divider()
+
+    # Regenerate button
+    col_regen, col_done = st.columns([1, 1])
+    with col_regen:
+        if st.button("🔄 Regenerate lesson", key=f"regen_{lesson_id}"):
+            del st.session_state.generated[lesson_id]
+            st.rerun()
+    with col_done:
+        is_complete = lesson_id in st.session_state.progress.get("completed", [])
+        if not is_complete:
+            if st.button("✅ Mark complete", key=f"done_{lesson_id}", type="primary"):
+                if "completed" not in st.session_state.progress:
+                    st.session_state.progress["completed"] = []
+                st.session_state.progress["completed"].append(lesson_id)
+                save_progress(st.session_state.progress)
+                # Auto-advance to next lesson
+                if st.session_state.lesson_idx < len(ALL_LESSONS) - 1:
+                    st.session_state.lesson_idx += 1
+                st.rerun()
         else:
-            st.info("Pitcher not in current IP filter — radar unavailable. Lower Min IP filter.")
+            st.success("Lesson complete ✅")
 
-    # Pitch arsenal
-    with col_right:
-        st.subheader("Pitch Arsenal")
-        if not pitcher_pitches.empty:
-            arsenal_cols = [c for c in [
-                "pitch_type", "thrown", "percentage_thrown",
-                "velocity", "spin_rate", "whiff_rate",
-                "stuff_plus", "location_plus", "pitching_plus",
-                "run_value_per_100_pitches",
-            ] if c in pitcher_pitches.columns]
+with right:
+    st.subheader(f"💬 Ask a question")
+    st.caption(f"Stuck on the challenge? Ask anything about this lesson.")
 
-            arsenal_df = pitcher_pitches[arsenal_cols].copy()
-            if "whiff_rate" in arsenal_df.columns and arsenal_df["whiff_rate"].max() <= 1:
-                arsenal_df["whiff_rate"] = arsenal_df["whiff_rate"] * 100
+    # Show API key reminder if pp_key not set
+    if not pp_key:
+        st.info("💡 Add your Pitch Profiler API key in the sidebar to run the code examples.")
 
-            arsenal_df = arsenal_df.sort_values("thrown", ascending=False) if "thrown" in arsenal_df.columns else arsenal_df
-            st.dataframe(
-                arsenal_df.rename(columns={c: METRIC_LABELS.get(c, c) for c in arsenal_cols}).reset_index(drop=True),
-                use_container_width=True,
-                height=340,
-            )
+    # Chat history
+    chat_container = st.container(height=460)
+    with chat_container:
+        chat_history = st.session_state.chat[lesson_id]
+        if not chat_history:
+            st.markdown("*Ask a question, paste your code for review, or say \"give me a hint\".*")
+        for msg in chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-            # Usage pie
-            if "pitch_type" in pitcher_pitches.columns and "thrown" in pitcher_pitches.columns:
-                fig_pie = px.pie(
-                    pitcher_pitches,
-                    names="pitch_type",
-                    values="thrown",
-                    color="pitch_type",
-                    color_discrete_map=PITCH_TYPE_COLORS,
-                    hole=0.4,
-                    height=200,
-                )
-                fig_pie.update_layout(margin=dict(l=0, r=0, t=0, b=0), showlegend=True)
-                st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("No pitch-level data found for this pitcher.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — SCATTER EXPLORER
-# ══════════════════════════════════════════════════════════════════════════════
-with tab3:
-    st.header("Scatter Explorer")
-
-    numeric_cols = [c for c in df.select_dtypes(include="number").columns if c != "pitcher_id"]
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        x_col = st.selectbox(
-            "X axis", numeric_cols,
-            format_func=lambda c: METRIC_LABELS.get(c, c),
-            index=numeric_cols.index("stuff_plus") if "stuff_plus" in numeric_cols else 0,
-        )
-    with col2:
-        y_col = st.selectbox(
-            "Y axis", numeric_cols,
-            format_func=lambda c: METRIC_LABELS.get(c, c),
-            index=numeric_cols.index("whiff_rate") if "whiff_rate" in numeric_cols else 1,
-        )
-    with col3:
-        color_col = st.selectbox("Color by", ["p_throws", "stuff_plus", "era", "arm_angle"], index=0)
-
-    # Filter out extreme outliers (ERA > 20)
-    plot_df = df[df["era"] < 20].copy() if "era" in df.columns else df.copy()
-
-    # Highlight pitcher
-    highlight = st.selectbox("Highlight pitcher (optional)", ["None"] + sorted(plot_df["pitcher_name"].unique()))
-
-    fig_scatter = px.scatter(
-        plot_df,
-        x=x_col,
-        y=y_col,
-        color=color_col,
-        hover_name="pitcher_name",
-        hover_data={
-            "p_throws": True,
-            "innings_pitched": ":.1f",
-            x_col: ":.2f",
-            y_col: ":.2f",
-        },
-        labels={
-            x_col: METRIC_LABELS.get(x_col, x_col),
-            y_col: METRIC_LABELS.get(y_col, y_col),
-        },
-        opacity=0.65,
-        height=580,
-        color_continuous_scale="RdYlGn" if color_col not in ("p_throws",) else None,
+    # Chat input
+    user_input = st.chat_input(
+        f"Ask about {lesson['title']}...",
+        key=f"chat_input_{lesson_id}",
     )
 
-    # League average lines
-    avg_x = plot_df[x_col].mean()
-    avg_y = plot_df[y_col].mean()
-    fig_scatter.add_vline(x=avg_x, line_dash="dash", line_color="gray", opacity=0.5)
-    fig_scatter.add_hline(y=avg_y, line_dash="dash", line_color="gray", opacity=0.5)
+    if user_input:
+        chat_history.append({"role": "user", "content": user_input})
 
-    # Highlight selected pitcher
-    if highlight != "None" and highlight in plot_df["pitcher_name"].values:
-        h_row = plot_df[plot_df["pitcher_name"] == highlight]
-        fig_scatter.add_trace(go.Scatter(
-            x=h_row[x_col], y=h_row[y_col],
-            mode="markers+text",
-            text=[highlight],
-            textposition="top center",
-            marker=dict(size=14, color="yellow", line=dict(color="black", width=2)),
-            showlegend=False,
-        ))
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(user_input)
+            with st.chat_message("assistant"):
+                response_placeholder = st.empty()
+                full_response = ""
+                for chunk in stream_chat_response(client, lesson, language, chat_history):
+                    full_response += chunk
+                    response_placeholder.markdown(full_response + "▌")
+                response_placeholder.markdown(full_response)
 
-    fig_scatter.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-    st.plotly_chart(fig_scatter, use_container_width=True)
+        chat_history.append({"role": "assistant", "content": full_response})
+        st.session_state.chat[lesson_id] = chat_history
 
-    # Correlation stat
-    corr = plot_df[[x_col, y_col]].dropna().corr().iloc[0, 1]
-    st.caption(f"Pearson correlation: **{corr:.3f}**  ·  n={len(plot_df.dropna(subset=[x_col, y_col]))}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — ARM ANGLE LAB
-# ══════════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.header("Arm Angle Lab")
-    st.caption("Arm angle = degrees from horizontal. Overhand ≈ 45–80°. Sidearm ≈ 0–20°. Submarine < 0°.")
-
-    if "arm_angle" not in df.columns:
-        st.error("arm_angle column not found in data.")
-    else:
-        aa_df = df.dropna(subset=["arm_angle"])
-
-        # Distribution
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_hist = px.histogram(
-                aa_df, x="arm_angle", color="p_throws",
-                barmode="overlay", opacity=0.7, nbins=40,
-                labels={"arm_angle": "Arm Angle (°)", "p_throws": "Hand"},
-                title="Arm Angle Distribution by Handedness",
-                height=350,
-                color_discrete_map={"R": "#636efa", "L": "#ef553b"},
-            )
-            fig_hist.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_hist, use_container_width=True)
-
-        with col2:
-            aa_metric = st.selectbox(
-                "Metric vs Arm Angle",
-                [c for c in ["whiff_rate", "stuff_plus", "primary_fb_velo", "ground_ball_percentage", "era"] if c in aa_df.columns],
-                format_func=lambda c: METRIC_LABELS.get(c, c),
-            )
-            fig_aa = px.scatter(
-                aa_df[aa_df["era"] < 20] if "era" in aa_df.columns else aa_df,
-                x="arm_angle", y=aa_metric,
-                color="p_throws",
-                hover_name="pitcher_name",
-                trendline="ols",
-                labels={"arm_angle": "Arm Angle (°)", aa_metric: METRIC_LABELS.get(aa_metric, aa_metric), "p_throws": "Hand"},
-                title=f"Arm Angle vs {METRIC_LABELS.get(aa_metric, aa_metric)}",
-                height=350,
-                color_discrete_map={"R": "#636efa", "L": "#ef553b"},
-                opacity=0.65,
-            )
-            fig_aa.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_aa, use_container_width=True)
-
-        st.divider()
-
-        # Bucket analysis
-        st.subheader("Performance by Arm Slot")
-        bins = [-180, -1, 15, 30, 45, 60, 180]
-        labels_bins = ["Submarine (<0°)", "Sidearm (0–15°)", "Low 3/4 (15–30°)",
-                       "3/4 (30–45°)", "High 3/4 (45–60°)", "Overhand (>60°)"]
-        aa_df = aa_df.copy()
-        aa_df["arm_slot"] = pd.cut(aa_df["arm_angle"], bins=bins, labels=labels_bins)
-
-        slot_metrics = ["whiff_rate", "stuff_plus", "era", "strike_out_percentage", "primary_fb_velo"]
-        slot_metrics = [m for m in slot_metrics if m in aa_df.columns]
-
-        slot_summary = (
-            aa_df.groupby("arm_slot", observed=True)[slot_metrics]
-            .mean()
-            .round(2)
-            .reset_index()
-        )
-        slot_summary["Count"] = aa_df.groupby("arm_slot", observed=True).size().values
-
-        st.dataframe(
-            slot_summary.rename(columns={**{c: METRIC_LABELS.get(c, c) for c in slot_metrics}, "arm_slot": "Arm Slot"}),
-            use_container_width=True,
-        )
-
-        # Slot comparison chart
-        slot_bar_metric = st.selectbox(
-            "Compare slots by",
-            slot_metrics,
-            format_func=lambda c: METRIC_LABELS.get(c, c),
-            key="slot_bar_metric",
-        )
-        fig_slot = px.bar(
-            slot_summary,
-            x="arm_slot", y=slot_bar_metric,
-            color=slot_bar_metric,
-            color_continuous_scale="RdYlGn_r" if slot_bar_metric in LOWER_IS_BETTER else "RdYlGn",
-            labels={"arm_slot": "Arm Slot", slot_bar_metric: METRIC_LABELS.get(slot_bar_metric, slot_bar_metric)},
-            text_auto=".2f",
-            height=360,
-        )
-        fig_slot.update_layout(
-            coloraxis_showscale=False,
-            xaxis_title="",
-            margin=dict(l=20, r=20, t=20, b=20),
-        )
-        st.plotly_chart(fig_slot, use_container_width=True)
+    # Quick action buttons
+    st.divider()
+    st.caption("Quick actions:")
+    qa_cols = st.columns(3)
+    with qa_cols[0]:
+        if st.button("💡 Hint", key=f"hint_{lesson_id}", use_container_width=True):
+            hint_msg = "Can you give me a hint for the challenge without giving away the answer?"
+            chat_history.append({"role": "user", "content": hint_msg})
+            st.session_state.chat[lesson_id] = chat_history
+            st.rerun()
+    with qa_cols[1]:
+        if st.button("🔍 Explain code", key=f"explain_{lesson_id}", use_container_width=True):
+            explain_msg = "Can you walk me through the code example line by line?"
+            chat_history.append({"role": "user", "content": explain_msg})
+            st.session_state.chat[lesson_id] = chat_history
+            st.rerun()
+    with qa_cols[2]:
+        if st.button("🗑️ Clear chat", key=f"clear_{lesson_id}", use_container_width=True):
+            st.session_state.chat[lesson_id] = []
+            st.rerun()
