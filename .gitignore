@@ -1,0 +1,17 @@
+# Local progress (stays on your machine)
+~/.coding_tutor_progress.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Env files with secrets
+.env
+*.env
+
+# Generated output
+*.html
