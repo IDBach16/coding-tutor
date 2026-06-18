@@ -476,11 +476,20 @@ with left:
         st.info(f"Generating {language} lesson using Pitch Profiler data...")
         gen_container = st.empty()
         full_text = ""
-        for chunk in generate_lesson(client, lesson, language):
-            full_text += chunk
-            gen_container.markdown(full_text + "▌")
-        gen_container.markdown(full_text)
-        st.session_state.generated[lesson_id] = full_text
+        try:
+            for chunk in generate_lesson(client, lesson, language):
+                full_text += chunk
+                gen_container.markdown(full_text + "▌")
+            gen_container.markdown(full_text)
+            st.session_state.generated[lesson_id] = full_text
+        except anthropic.AuthenticationError:
+            gen_container.error(
+                "**Invalid Anthropic API key.** "
+                "Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) "
+                "to create a new key, then paste it in the 🔑 API Keys section of the sidebar."
+            )
+        except Exception as e:
+            gen_container.error(f"Failed to generate lesson: {e}")
     else:
         st.markdown(st.session_state.generated[lesson_id])
 
@@ -540,10 +549,17 @@ with right:
             with st.chat_message("assistant"):
                 response_placeholder = st.empty()
                 full_response = ""
-                for chunk in stream_chat_response(client, lesson, language, chat_history):
-                    full_response += chunk
-                    response_placeholder.markdown(full_response + "▌")
-                response_placeholder.markdown(full_response)
+                try:
+                    for chunk in stream_chat_response(client, lesson, language, chat_history):
+                        full_response += chunk
+                        response_placeholder.markdown(full_response + "▌")
+                    response_placeholder.markdown(full_response)
+                except anthropic.AuthenticationError:
+                    full_response = "Invalid API key — check the 🔑 API Keys section in the sidebar."
+                    response_placeholder.error(full_response)
+                except Exception as e:
+                    full_response = f"Error: {e}"
+                    response_placeholder.error(full_response)
 
         chat_history.append({"role": "assistant", "content": full_response})
         st.session_state.chat[lesson_id] = chat_history
