@@ -371,20 +371,27 @@ with st.sidebar:
     st.caption("Learn Python or R with real MLB pitching data")
     st.divider()
 
-    # API keys
-    with st.expander("🔑 API Keys", expanded=False):
+    # API keys — reads from ~/.streamlit/secrets.toml, then env vars, then UI input
+    def _secret(key: str) -> str:
+        try:
+            return st.secrets.get(key, os.environ.get(key, ""))
+        except Exception:
+            return os.environ.get(key, "")
+
+    with st.expander("🔑 API Keys", expanded=not bool(_secret("ANTHROPIC_API_KEY"))):
         anthropic_key = st.text_input(
             "Anthropic API Key",
-            value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            value=_secret("ANTHROPIC_API_KEY"),
             type="password",
             key="anthropic_key_input",
         )
         pp_key = st.text_input(
             "Pitch Profiler API Key",
-            value=os.environ.get("PITCH_PROFILER_API_KEY", ""),
+            value=_secret("PITCH_PROFILER_API_KEY"),
             type="password",
             key="pp_key_input",
         )
+        st.caption("Keys saved? Add them to `~/.streamlit/secrets.toml` so they auto-fill.")
 
     if not anthropic_key:
         st.warning("Add your Anthropic API key to begin.")

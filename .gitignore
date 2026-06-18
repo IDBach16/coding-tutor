@@ -13,5 +13,8 @@ env/
 .env
 *.env
 
+# Streamlit secrets — never commit
+.streamlit/secrets.toml
+
 # Generated output
 *.html
