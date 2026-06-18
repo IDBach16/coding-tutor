@@ -5,6 +5,8 @@ Full course using real Pitch Profiler MLB pitching data throughout.
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import anthropic
 import streamlit as st
@@ -258,6 +260,74 @@ hr {
     border-color: #FF6B35 !important;
 }
 
+/* ── Tabs ── */
+[data-testid="stTabs"] [role="tablist"] {
+    background-color: #161b22;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid #21262d;
+    border-bottom: none;
+    padding: 4px 6px 0 6px;
+    gap: 4px;
+}
+[data-testid="stTabs"] [role="tab"] {
+    color: #8b949e !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    padding: 6px 16px !important;
+    border-radius: 6px 6px 0 0 !important;
+    border: none !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    color: #e6edf3 !important;
+    background-color: #0d1117 !important;
+    border-bottom: 2px solid #FF6B35 !important;
+}
+[data-testid="stTabsContent"] {
+    border: 1px solid #21262d;
+    border-radius: 0 0 8px 8px;
+    padding: 12px;
+    background-color: #0d1117;
+}
+
+/* ── Code editor textarea ── */
+textarea[data-testid="stTextArea"] {
+    background-color: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 6px !important;
+    color: #e6edf3 !important;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace !important;
+    font-size: 0.82rem !important;
+    line-height: 1.5 !important;
+}
+textarea[data-testid="stTextArea"]:focus {
+    border-color: #FF6B35 !important;
+    box-shadow: 0 0 0 1px #FF6B35 !important;
+}
+
+/* ── Output / grade panels ── */
+.output-panel {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: #79c0ff;
+    max-height: 180px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    margin-bottom: 10px;
+}
+.output-error {
+    color: #f78166;
+}
+.grade-panel {
+    background-color: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 14px 16px;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #0d1117; }
@@ -487,6 +557,9 @@ for key, default in [
     ("lesson_idx", 0),
     ("generated", {}),
     ("chat", {}),
+    ("code_drafts", {}),
+    ("grade_results", {}),
+    ("run_output", {}),
     ("progress", load_progress()),
 ]:
     if key not in st.session_state:
@@ -563,6 +636,76 @@ def stream_chat(client, lesson: dict, language: str, history: list):
         system=chat_system_prompt(lesson, language),
         thinking={"type": "adaptive"},
         messages=[{"role": m["role"], "content": m["content"]} for m in history],
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
+def run_code(code: str, language: str) -> tuple:
+    """Run code locally, return (stdout, stderr, success)."""
+    tutor_dir = str(Path(__file__).parent)
+    try:
+        if language == "Python":
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                capture_output=True, text=True, timeout=30, cwd=tutor_dir,
+            )
+        else:
+            result = subprocess.run(
+                ["Rscript", "-e", code],
+                capture_output=True, text=True, timeout=30, cwd=tutor_dir,
+            )
+        return result.stdout.strip(), result.stderr.strip(), result.returncode == 0
+    except FileNotFoundError:
+        return "", f"{language} interpreter not found. Make sure {'Python' if language == 'Python' else 'R'} is installed.", False
+    except subprocess.TimeoutExpired:
+        return "", "Code timed out after 30 seconds.", False
+
+def grade_code(client, lesson: dict, language: str, code: str, stdout: str, stderr: str):
+    generated = st.session_state.generated.get(lesson["id"], "")
+    challenge = ""
+    if "## Your Challenge" in generated:
+        start = generated.index("## Your Challenge")
+        end = generated.index("## Hints") if "## Hints" in generated else len(generated)
+        challenge = generated[start:end].strip()
+
+    output_block = stdout if stdout else "(no output)"
+    if stderr:
+        output_block += f"\n\nERRORS:\n{stderr}"
+
+    with client.messages.stream(
+        model="claude-opus-4-8",
+        max_tokens=1200,
+        thinking={"type": "adaptive"},
+        system=f"""You are a {language} coding tutor grading a student submission.
+{DATA_CONTEXT}
+Lesson: "{lesson['title']}" | Goal: {lesson['goal']}
+Concepts: {', '.join(lesson['concepts'])}""",
+        messages=[{"role": "user", "content": f"""Grade this code. Be honest, specific, and encouraging.
+
+{challenge if challenge else f'Lesson goal: {lesson["goal"]}'}
+
+STUDENT CODE:
+```
+{code}
+```
+
+OUTPUT:
+{output_block}
+
+Use EXACTLY these headers:
+
+## Score
+X/10 — one sentence verdict.
+
+## What Works
+- bullet points on correct/well-done parts
+
+## What to Fix
+- specific issues or "Nothing — great job!" if perfect
+
+## Improved Version
+Show corrected code ONLY if there are real fixes needed. Skip this section if the code is correct.
+"""}],
     ) as stream:
         for text in stream.text_stream:
             yield text
@@ -700,61 +843,117 @@ with left:
         else:
             st.success("Complete ✓", icon="⚾")
 
-# ── Chat panel ────────────────────────────────────────────────────────────────
+# ── Right panel: Chat + Code tabs ─────────────────────────────────────────────
 with right:
-    st.markdown(f"""
-    <div style="background:#161b22;border:1px solid #21262d;border-radius:10px;padding:16px 18px 8px 18px;margin-bottom:12px">
-        <div class="chat-panel-header">💬 Ask the tutor</div>
-        <div class="chat-panel-sub">Stuck? Paste your code, ask a question, or say "give me a hint."</div>
-    </div>
-    """, unsafe_allow_html=True)
+    tab_chat, tab_code = st.tabs(["💬 Ask Tutor", "💻 Code Playground"])
 
-    chat_history = st.session_state.chat[lesson_id]
-    chat_box = st.container(height=430)
-    with chat_box:
-        if not chat_history:
-            st.markdown("<p style='color:#484f58;font-size:0.85rem;padding:8px 0'>No messages yet. Ask anything about this lesson.</p>", unsafe_allow_html=True)
-        for msg in chat_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-    user_input = st.chat_input(f"Ask about {lesson['title']}…", key=f"ci_{lesson_id}")
-    if user_input:
-        chat_history.append({"role": "user", "content": user_input})
+    # ── Chat tab ──────────────────────────────────────────────────────────────
+    with tab_chat:
+        chat_history = st.session_state.chat[lesson_id]
+        chat_box = st.container(height=400)
         with chat_box:
-            with st.chat_message("user"):
-                st.markdown(user_input)
-            with st.chat_message("assistant"):
-                ph = st.empty()
-                resp = ""
-                try:
-                    for chunk in stream_chat(client, lesson, language, chat_history):
-                        resp += chunk
-                        ph.markdown(resp + "▌")
-                    ph.markdown(resp)
-                except anthropic.AuthenticationError:
-                    resp = "Invalid API key — update it in the sidebar."
-                    ph.error(resp)
-                except Exception as e:
-                    resp = f"Error: {e}"
-                    ph.error(resp)
-        chat_history.append({"role": "assistant", "content": resp})
-        st.session_state.chat[lesson_id] = chat_history
+            if not chat_history:
+                st.markdown("<p style='color:#484f58;font-size:0.85rem;padding:8px 0'>No messages yet. Ask anything about this lesson.</p>", unsafe_allow_html=True)
+            for msg in chat_history:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-    # Quick actions
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    qa1, qa2, qa3 = st.columns(3)
-    with qa1:
-        if st.button("💡 Hint", key=f"hint_{lesson_id}", use_container_width=True):
-            chat_history.append({"role": "user", "content": "Give me a hint for the challenge without giving away the answer."})
+        user_input = st.chat_input(f"Ask about {lesson['title']}…", key=f"ci_{lesson_id}")
+        if user_input:
+            chat_history.append({"role": "user", "content": user_input})
+            with chat_box:
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+                with st.chat_message("assistant"):
+                    ph = st.empty()
+                    resp = ""
+                    try:
+                        for chunk in stream_chat(client, lesson, language, chat_history):
+                            resp += chunk
+                            ph.markdown(resp + "▌")
+                        ph.markdown(resp)
+                    except anthropic.AuthenticationError:
+                        resp = "Invalid API key — update it in the sidebar."
+                        ph.error(resp)
+                    except Exception as e:
+                        resp = f"Error: {e}"
+                        ph.error(resp)
+            chat_history.append({"role": "assistant", "content": resp})
             st.session_state.chat[lesson_id] = chat_history
-            st.rerun()
-    with qa2:
-        if st.button("🔍 Explain", key=f"explain_{lesson_id}", use_container_width=True):
-            chat_history.append({"role": "user", "content": "Walk me through the code example line by line."})
-            st.session_state.chat[lesson_id] = chat_history
-            st.rerun()
-    with qa3:
-        if st.button("🗑 Clear", key=f"clear_{lesson_id}", use_container_width=True):
-            st.session_state.chat[lesson_id] = []
-            st.rerun()
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        qa1, qa2, qa3 = st.columns(3)
+        with qa1:
+            if st.button("💡 Hint", key=f"hint_{lesson_id}", use_container_width=True):
+                chat_history.append({"role": "user", "content": "Give me a hint for the challenge without giving away the answer."})
+                st.session_state.chat[lesson_id] = chat_history
+                st.rerun()
+        with qa2:
+            if st.button("🔍 Explain", key=f"explain_{lesson_id}", use_container_width=True):
+                chat_history.append({"role": "user", "content": "Walk me through the code example line by line."})
+                st.session_state.chat[lesson_id] = chat_history
+                st.rerun()
+        with qa3:
+            if st.button("🗑 Clear", key=f"clear_{lesson_id}", use_container_width=True):
+                st.session_state.chat[lesson_id] = []
+                st.rerun()
+
+    # ── Code Playground tab ───────────────────────────────────────────────────
+    with tab_code:
+        st.markdown(f"<p style='color:#8b949e;font-size:0.82rem;margin-bottom:8px'>Write your solution to the challenge below, then hit <strong style='color:#FF6B35'>Run & Grade</strong>.</p>", unsafe_allow_html=True)
+
+        default_code = st.session_state.code_drafts.get(lesson_id, f"# {lesson['title']} — Your solution\n# Goal: {lesson['goal']}\n\n")
+        code_input = st.text_area(
+            "Your code",
+            value=default_code,
+            height=260,
+            key=f"code_{lesson_id}",
+            label_visibility="collapsed",
+            placeholder=f"# Write your {language} solution here…",
+        )
+        st.session_state.code_drafts[lesson_id] = code_input
+
+        run_col, clear_col = st.columns([3, 1])
+        with run_col:
+            run_btn = st.button("▶  Run & Grade", key=f"run_{lesson_id}", type="primary", use_container_width=True)
+        with clear_col:
+            if st.button("🗑", key=f"clrcode_{lesson_id}", use_container_width=True):
+                st.session_state.code_drafts[lesson_id] = f"# {lesson['title']} — Your solution\n# Goal: {lesson['goal']}\n\n"
+                st.session_state.grade_results.pop(lesson_id, None)
+                st.session_state.run_output.pop(lesson_id, None)
+                st.rerun()
+
+        if run_btn and code_input.strip():
+            with st.spinner("Running your code…"):
+                stdout, stderr, success = run_code(code_input, language)
+                st.session_state.run_output[lesson_id] = (stdout, stderr, success)
+            st.session_state.grade_results.pop(lesson_id, None)
+
+        # Output panel
+        if lesson_id in st.session_state.run_output:
+            stdout, stderr, success = st.session_state.run_output[lesson_id]
+            label = "Output" if success else "Output (errors)"
+            color_cls = "" if success else "output-error"
+            display = stdout if stdout else "(no output)"
+            if stderr:
+                display += f"\n\n{stderr}"
+            st.markdown(f"<p style='color:#8b949e;font-size:0.75rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin:10px 0 4px'>{label}</p>", unsafe_allow_html=True)
+            st.markdown(f'<div class="output-panel {color_cls}">{display}</div>', unsafe_allow_html=True)
+
+            # Grade
+            if lesson_id not in st.session_state.grade_results:
+                grade_ph = st.empty()
+                grade_text = ""
+                try:
+                    with st.spinner("Claude is grading your code…"):
+                        for chunk in grade_code(client, lesson, language, code_input, stdout, stderr):
+                            grade_text += chunk
+                            grade_ph.markdown(grade_text + "▌")
+                    grade_ph.markdown(grade_text)
+                    st.session_state.grade_results[lesson_id] = grade_text
+                except anthropic.AuthenticationError:
+                    grade_ph.error("Invalid API key — update it in the sidebar.")
+                except Exception as e:
+                    grade_ph.error(f"Grading error: {e}")
+            else:
+                st.markdown(st.session_state.grade_results[lesson_id])
